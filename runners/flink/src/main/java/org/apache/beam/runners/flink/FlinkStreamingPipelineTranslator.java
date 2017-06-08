@@ -20,11 +20,12 @@ package org.apache.beam.runners.flink;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.Map;
-import org.apache.beam.runners.core.SplittableParDo;
+import org.apache.beam.runners.core.SplittableParDoViaKeyedWorkItems;
 import org.apache.beam.runners.core.construction.PTransformMatchers;
 import org.apache.beam.runners.core.construction.PTransformReplacements;
 import org.apache.beam.runners.core.construction.ReplacementOutputs;
 import org.apache.beam.runners.core.construction.SingleInputOutputOverrideFactory;
+import org.apache.beam.runners.core.construction.SplittableParDo;
 import org.apache.beam.runners.core.construction.UnconsumedReads;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -32,10 +33,9 @@ import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.runners.PTransformOverride;
 import org.apache.beam.sdk.runners.PTransformOverrideFactory;
 import org.apache.beam.sdk.runners.TransformHierarchy;
-import org.apache.beam.sdk.transforms.Combine;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo.MultiOutput;
-import org.apache.beam.sdk.transforms.View;
+import org.apache.beam.sdk.transforms.View.CreatePCollectionView;
 import org.apache.beam.sdk.util.InstanceBuilder;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionTuple;
@@ -80,37 +80,12 @@ class FlinkStreamingPipelineTranslator extends FlinkPipelineTranslator {
                     new SplittableParDoOverrideFactory()))
             .add(
                 PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(View.AsIterable.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingViewAsIterable.class, flinkRunner)))
+                    PTransformMatchers.classEqualTo(SplittableParDo.ProcessKeyedElements.class),
+                    new SplittableParDoViaKeyedWorkItems.OverrideFactory()))
             .add(
                 PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(View.AsList.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingViewAsList.class, flinkRunner)))
-            .add(
-                PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(View.AsMap.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingViewAsMap.class, flinkRunner)))
-            .add(
-                PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(View.AsMultimap.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingViewAsMultimap.class, flinkRunner)))
-            .add(
-                PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(View.AsSingleton.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingViewAsSingleton.class, flinkRunner)))
-            // this has to be last since the ViewAsSingleton override
-            // can expand to a Combine.GloballyAsSingletonView
-            .add(
-                PTransformOverride.of(
-                    PTransformMatchers.classEqualTo(Combine.GloballyAsSingletonView.class),
-                    new ReflectiveOneToOneOverrideFactory(
-                        FlinkStreamingViewOverrides.StreamingCombineGloballyAsSingletonView.class,
-                        flinkRunner)))
+                    PTransformMatchers.classEqualTo(CreatePCollectionView.class),
+                    new CreateStreamingFlinkView.Factory()))
             .build();
 
     // Ensure all outputs of all reads are consumed.
@@ -183,7 +158,7 @@ class FlinkStreamingPipelineTranslator extends FlinkPipelineTranslator {
     StreamTransformTranslator<T> typedTranslator = (StreamTransformTranslator<T>) translator;
 
     // create the applied PTransform on the streamingContext
-    streamingContext.setCurrentTransform(node.toAppliedPTransform());
+    streamingContext.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
     typedTranslator.translateNode(typedTransform, streamingContext);
   }
 
@@ -198,7 +173,7 @@ class FlinkStreamingPipelineTranslator extends FlinkPipelineTranslator {
     @SuppressWarnings("unchecked")
     StreamTransformTranslator<T> typedTranslator = (StreamTransformTranslator<T>) translator;
 
-    streamingContext.setCurrentTransform(node.toAppliedPTransform());
+    streamingContext.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
 
     return typedTranslator.canTranslate(typedTransform, streamingContext);
   }

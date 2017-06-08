@@ -257,9 +257,9 @@ class GcsIO(object):
       self.client.objects.Copy(request)
     except HttpError as http_error:
       if http_error.status_code == 404:
-        # This is a permanent error that should not be retried.  Note that
-        # FileSink.finalize_write expects an IOError when the source file does
-        # not exist.
+        # This is a permanent error that should not be retried. Note that
+        # FileBasedSink.finalize_write expects an IOError when the source
+        # file does not exist.
         raise GcsIOError(errno.ENOENT, 'Source file not found: %s' % src)
       raise
 
@@ -392,7 +392,7 @@ class GcsIO(object):
         if fnmatch.fnmatch(item.name, name_pattern):
           file_name = 'gs://%s/%s' % (item.bucket, item.name)
           file_sizes[file_name] = item.size
-        counter += 1
+          counter += 1
         if limit is not None and counter >= limit:
           break
         if counter % 10000 == 0:

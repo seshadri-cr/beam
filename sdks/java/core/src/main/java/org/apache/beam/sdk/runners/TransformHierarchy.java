@@ -24,10 +24,12 @@ import static com.google.common.base.Preconditions.checkState;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -39,6 +41,7 @@ import org.apache.beam.sdk.Pipeline.PipelineVisitor.CompositeBehavior;
 import org.apache.beam.sdk.annotations.Internal;
 import org.apache.beam.sdk.runners.PTransformOverrideFactory.ReplacementOutput;
 import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PInput;
 import org.apache.beam.sdk.values.POutput;
 import org.apache.beam.sdk.values.PValue;
@@ -56,7 +59,6 @@ import org.slf4j.LoggerFactory;
 public class TransformHierarchy {
   private static final Logger LOG = LoggerFactory.getLogger(TransformHierarchy.class);
 
-  private final Pipeline pipeline;
   private final Node root;
   private final Map<Node, PInput> unexpandedInputs;
   private final Map<POutput, Node> producers;
@@ -65,8 +67,7 @@ public class TransformHierarchy {
   // Maintain a stack based on the enclosing nodes
   private Node current;
 
-  public TransformHierarchy(Pipeline pipeline) {
-    this.pipeline = pipeline;
+  public TransformHierarchy() {
     producers = new HashMap<>();
     producerInput = new HashMap<>();
     unexpandedInputs = new HashMap<>();
@@ -167,7 +168,7 @@ public class TransformHierarchy {
    * nodes.
    */
   public void setOutput(POutput output) {
-    for (PValue value : output.expand().values()) {
+    for (PCollection<?> value : fullyExpand(output).values()) {
       if (!producers.containsKey(value)) {
         producers.put(value, current);
         value.finishSpecifyingOutput(
@@ -226,6 +227,47 @@ public class TransformHierarchy {
 
   public Node getCurrent() {
     return current;
+  }
+
+  private Map<TupleTag<?>, PCollection<?>> fullyExpand(POutput output) {
+    Map<TupleTag<?>, PCollection<?>> result = new LinkedHashMap<>();
+    for (Map.Entry<TupleTag<?>, PValue> value : output.expand().entrySet()) {
+      if (value.getValue() instanceof PCollection) {
+        PCollection<?> previous = result.put(value.getKey(), (PCollection<?>) value.getValue());
+        checkArgument(
+            previous == null,
+            "Found conflicting %ss in flattened expansion of %s: %s maps to %s and %s",
+            output,
+            TupleTag.class.getSimpleName(),
+            value.getKey(),
+            previous,
+            value.getValue());
+      } else {
+        if (value.getValue().expand().size() == 1
+            && Iterables.getOnlyElement(value.getValue().expand().values())
+                .equals(value.getValue())) {
+          throw new IllegalStateException(
+              String.format(
+                  "Non %s %s that expands into itself %s",
+                  PCollection.class.getSimpleName(),
+                  PValue.class.getSimpleName(),
+                  value.getValue()));
+        }
+        for (Map.Entry<TupleTag<?>, PCollection<?>> valueComponent :
+            fullyExpand(value.getValue()).entrySet()) {
+          PCollection<?> previous = result.put(valueComponent.getKey(), valueComponent.getValue());
+          checkArgument(
+              previous == null,
+              "Found conflicting %ss in flattened expansion of %s: %s maps to %s and %s",
+              output,
+              TupleTag.class.getSimpleName(),
+              valueComponent.getKey(),
+              previous,
+              valueComponent.getValue());
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -453,7 +495,7 @@ public class TransformHierarchy {
     /**
      * Returns the {@link AppliedPTransform} representing this {@link Node}.
      */
-    public AppliedPTransform<?, ?, ?> toAppliedPTransform() {
+    public AppliedPTransform<?, ?, ?> toAppliedPTransform(Pipeline pipeline) {
       return AppliedPTransform.of(
           getFullName(), inputs, outputs, (PTransform) getTransform(), pipeline);
     }

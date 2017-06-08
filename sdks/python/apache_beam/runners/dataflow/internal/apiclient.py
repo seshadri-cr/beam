@@ -145,7 +145,7 @@ class Environment(object):
     # Version information.
     self.proto.version = dataflow.Environment.VersionValue()
     if self.standard_options.streaming:
-      job_type = 'PYTHON_STREAMING'
+      job_type = 'FNAPI_STREAMING'
     else:
       job_type = 'PYTHON_BATCH'
     self.proto.version.additionalProperties.extend([
@@ -199,6 +199,8 @@ class Environment(object):
       pool.zone = self.worker_options.zone
     if self.worker_options.network:
       pool.network = self.worker_options.network
+    if self.worker_options.subnetwork:
+      pool.subnetwork = self.worker_options.subnetwork
     if self.worker_options.worker_harness_container_image:
       pool.workerHarnessContainerImage = (
           self.worker_options.worker_harness_container_image)
