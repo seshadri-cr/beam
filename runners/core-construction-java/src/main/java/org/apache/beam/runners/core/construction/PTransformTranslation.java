@@ -52,9 +52,16 @@ public class PTransformTranslation {
   public static final String WINDOW_TRANSFORM_URN = "urn:beam:transform:window:v1";
   public static final String TEST_STREAM_TRANSFORM_URN = "urn:beam:transform:teststream:v1";
 
+  // Not strictly a primitive transform
+  public static final String COMBINE_TRANSFORM_URN = "urn:beam:transform:combine:v1";
+
   // Less well-known. And where shall these live?
   public static final String WRITE_FILES_TRANSFORM_URN = "urn:beam:transform:write_files:0.1";
 
+  /**
+   * @deprecated runners should move away from translating `CreatePCollectionView` and treat this
+   * as part of the translation for a `ParDo` side input.
+   */
   @Deprecated
   public static final String CREATE_VIEW_TRANSFORM_URN = "urn:beam:transform:create_view:v1";
 
