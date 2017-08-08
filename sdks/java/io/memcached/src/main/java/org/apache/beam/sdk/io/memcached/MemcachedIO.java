@@ -25,8 +25,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import net.spy.memcached.AddrUtil;
-import net.spy.memcached.ConnectionFactoryBuilder;
-import net.spy.memcached.ConnectionFactoryBuilder.Protocol;
+import net.spy.memcached.ConnectionFactory;
 import net.spy.memcached.MemcachedClient;
 
 import org.apache.beam.sdk.annotations.Experimental;
@@ -64,22 +63,22 @@ public class MemcachedIO {
   @AutoValue
   public abstract static class Read extends
   PTransform<PCollection<String>, PCollection<KV<String, Object>>> {
-    @Nullable abstract Protocol getProtocol();
+    @Nullable abstract ConnectionFactory getConnectionFactory();
     @Nullable abstract List<String> getAddresses();
 
     abstract Builder toBuilder();
 
     @AutoValue.Builder
     abstract static class Builder {
-      abstract Builder setProtocol(Protocol protocol);
+      abstract Builder setConnectionFactory(ConnectionFactory connFactory);
       abstract Builder setAddresses(List<String> addresses);
       abstract Read build();
     }
 
-    public Read withProtocol(Protocol protocol) {
-      checkArgument(protocol != null,
-          "MemcachedIO.read().withProtocol(protocol) called with null protocol");
-      return toBuilder().setProtocol(protocol).build();
+    public Read withConnectionFactory(ConnectionFactory connFactory) {
+      checkArgument(connFactory != null,
+          "MemcachedIO.read().withConnectionFactory(connFactory) called with null connFactory");
+      return toBuilder().setConnectionFactory(connFactory).build();
     }
 
     public Read withAddresses(List<String> addresses) {
@@ -101,14 +100,10 @@ public class MemcachedIO {
     @Override
     public void populateDisplayData(DisplayData.Builder builder) {
       super.populateDisplayData(builder);
-/*      builder.add(DisplayData.item("query", getQuery()));
-      builder.add(DisplayData.item("rowMapper", getRowMapper().getClass().getName()));
-      builder.add(DisplayData.item("coder", getCoder().getClass().getName()));
-*/    }
+    }
 
     /** A {@link DoFn} executing the SQL query to read from the database. */
     static class ReadFn extends DoFn<String, KV<String, Object>> {
-      private static final int DEFAULT_BATCH_SIZE = 1;
       private MemcachedIO.Read spec;
       private MemcachedClient memcachedClient;
 
@@ -119,9 +114,7 @@ public class MemcachedIO {
       @Setup
       public void setup() throws Exception {
         memcachedClient = new MemcachedClient(
-            new ConnectionFactoryBuilder()
-            .setProtocol(spec.getProtocol())
-            .build(),
+            spec.getConnectionFactory(),
             AddrUtil.getAddresses(spec.getAddresses()));
       }
 
@@ -141,23 +134,24 @@ public class MemcachedIO {
 
   /** A {@link PTransform} to read data from a memcached key-value store. */
   @AutoValue
-  public abstract static class Write extends PTransform< PCollection<KV<String, Object>>, PDone> {
-    @Nullable abstract Protocol getProtocol();
+  public abstract static class Write extends
+  PTransform<PCollection<KV<String, KV<Integer, Object>>>, PDone> {
+    @Nullable abstract ConnectionFactory getConnectionFactory();
     @Nullable abstract List<String> getAddresses();
 
     abstract Builder toBuilder();
 
     @AutoValue.Builder
     abstract static class Builder {
-      abstract Builder setProtocol(Protocol protocol);
+      abstract Builder setConnectionFactory(ConnectionFactory connFactory);
       abstract Builder setAddresses(List<String> addresses);
       abstract MemcachedIO.Write build();
     }
 
-    public Write withProtocol(Protocol protocol) {
-      checkArgument(protocol != null,
-          "MemcachedIO.read().withProtocol(protocol) called with null protocol");
-      return toBuilder().setProtocol(protocol).build();
+    public Write withConnectionFactory(ConnectionFactory connFactory) {
+      checkArgument(connFactory != null,
+          "MemcachedIO.read().withConnectionFactory(connFactory) called with null connFactory");
+      return toBuilder().setConnectionFactory(connFactory).build();
     }
 
     public Write withAddresses(List<String> addresses) {
@@ -167,7 +161,7 @@ public class MemcachedIO {
     }
 
     @Override
-    public PDone expand(PCollection<KV<String, Object>> input) {
+    public PDone expand(PCollection<KV<String, KV<Integer, Object>>> input) {
       input.apply(ParDo.of(new WriteFn(this)));
       return PDone.in(input.getPipeline());
     }
@@ -179,14 +173,10 @@ public class MemcachedIO {
     @Override
     public void populateDisplayData(DisplayData.Builder builder) {
       super.populateDisplayData(builder);
-/*      builder.add(DisplayData.item("query", getQuery()));
-      builder.add(DisplayData.item("rowMapper", getRowMapper().getClass().getName()));
-      builder.add(DisplayData.item("coder", getCoder().getClass().getName()));
-*/    }
+    }
 
     /** A {@link DoFn} executing the SQL query to read from the database. */
-    static class WriteFn extends DoFn<KV<String, Object>, Void> {
-      private static final int DEFAULT_BATCH_SIZE = 1;
+    static class WriteFn extends DoFn<KV<String, KV<Integer, Object>>, Void> {
       private MemcachedIO.Write spec;
       private MemcachedClient memcachedClient;
 
@@ -197,15 +187,15 @@ public class MemcachedIO {
       @Setup
       public void setup() throws Exception {
         memcachedClient = new MemcachedClient(
-            new ConnectionFactoryBuilder()
-            .setProtocol(spec.getProtocol())
-            .build(),
+            spec.getConnectionFactory(),
             AddrUtil.getAddresses(spec.getAddresses()));
       }
 
       @ProcessElement
       public void processElement(ProcessContext context) throws Exception {
-        memcachedClient.set(context.element().getKey(), 3600, context.element().getValue());
+        memcachedClient.set(context.element().getKey(),
+            context.element().getValue().getKey(),
+            context.element().getValue().getValue());
       }
 
       @Teardown
@@ -214,5 +204,4 @@ public class MemcachedIO {
       }
     }
   }
-
 }
